@@ -8,7 +8,7 @@ const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "127.0.0.1";
 const DATA_DIR = path.resolve(process.env.PIT_DATA_DIR || "./data");
 const MAX_BODY = 1024 * 1024;
-const DONATION_URL = process.env.DONATION_URL || "";
+const DONATION_URL = process.env.DONATION_URL || "https://cash.app/$creakyca";
 const ROOM_VISIBILITIES = new Set(["private", "public"]);
 const PRESENCE_STATES = new Set(["working", "thinking", "waiting", "blocked", "idle", "done"]);
 const VALID_SCOPES = new Set(["read", "write", "admin"]);
@@ -85,6 +85,8 @@ function validRoom(value) {
 function roomDir(room) { return path.join(DATA_DIR, "rooms", room); }
 function eventFile(room) { return path.join(roomDir(room), "events.jsonl"); }
 function roomMetaFile(room) { return path.join(roomDir(room), "room.json"); }
+function requestDir(room) { return path.join(roomDir(room), "access-requests"); }
+function requestFile(room, id) { return path.join(requestDir(room), id + ".json"); }
 function roomExists(room) { return fs.existsSync(roomMetaFile(room)); }
 function makeRoomId(input) {
   const base = String(input || "pit").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "pit";
@@ -120,6 +122,69 @@ function updateRoomMeta(room, patch) {
 function loadRoomMeta(room) {
   if (!roomExists(room)) return null;
   return JSON.parse(fs.readFileSync(roomMetaFile(room), "utf8"));
+}
+function hashRequestSecret(secret) {
+  return crypto.createHash("sha256").update(secret).digest("hex");
+}
+function publicRequest(value, includeInvite = false) {
+  const out = {
+    id: value.id,
+    room: value.room,
+    name: value.name,
+    worker: value.worker,
+    message: value.message,
+    requested_role: value.requested_role,
+    status: value.status,
+    created_at: value.created_at,
+    resolved_at: value.resolved_at || null
+  };
+  if (includeInvite && value.status === "approved") {
+    out.role = value.role;
+    out.invite_url = value.invite_url;
+    out.token = value.token;
+  }
+  return out;
+}
+function createAccessRequest(room, input) {
+  const requestedRole = input.requested_role || "write";
+  if (!["read", "write"].includes(requestedRole)) throw new Error("requested role must be read or write");
+  if (input.worker != null && input.worker !== "" && !validName(input.worker)) throw new Error("invalid worker");
+  const id = crypto.randomUUID();
+  const secret = crypto.randomBytes(24).toString("base64url");
+  const value = {
+    id,
+    room,
+    name: String(input.name || "").trim().slice(0, 120) || null,
+    worker: input.worker || null,
+    message: String(input.message || "").trim().slice(0, 1000) || null,
+    requested_role: requestedRole,
+    status: "pending",
+    created_at: new Date().toISOString(),
+    secret_hash: hashRequestSecret(secret)
+  };
+  fs.mkdirSync(requestDir(room), { recursive: true });
+  fs.writeFileSync(requestFile(room, id), JSON.stringify(value, null, 2));
+  return { request: publicRequest(value), secret };
+}
+function readAccessRequest(room, id) {
+  if (!validName(id)) return null;
+  const file = requestFile(room, id);
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+function writeAccessRequest(room, value) {
+  fs.mkdirSync(requestDir(room), { recursive: true });
+  fs.writeFileSync(requestFile(room, value.id), JSON.stringify(value, null, 2));
+}
+function listAccessRequests(room) {
+  const dir = requestDir(room);
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    try { out.push(publicRequest(JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")))); } catch {}
+  }
+  return out.sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 function loadRoom(room) {
   if (rooms.has(room)) return rooms.get(room);
@@ -234,6 +299,69 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/health") return sendJson(res, 200, { ok: true, service: "convopit" });
   if (req.method === "GET" && pathname === "/api/config") {
     return sendJson(res, 200, { donation_url: DONATION_URL || null });
+  }
+
+  const publicRoomMatch = pathname.match(/^\/api\/rooms\/([^/]+)\/(info|access-requests|access-request-status)$/);
+  if (publicRoomMatch) {
+    const [, room, endpoint] = publicRoomMatch;
+    if (!validRoom(room) || !roomExists(room)) return sendJson(res, 404, { error: "room not found" });
+    try {
+      if (endpoint === "info" && req.method === "GET") {
+        return sendJson(res, 200, { room: loadRoomMeta(room) });
+      }
+      if (endpoint === "access-requests" && req.method === "POST") {
+        const admin = verifyInvite(getBearer(req), room);
+        const body = await readJson(req);
+        if (admin && can(admin, "admin") && body.action) {
+          const value = readAccessRequest(room, body.request_id);
+          if (!value) return sendJson(res, 404, { error: "request not found" });
+          if (value.status !== "pending") return sendJson(res, 409, { error: "request already resolved" });
+          if (body.action === "deny") {
+            value.status = "denied";
+            value.resolved_at = new Date().toISOString();
+            writeAccessRequest(room, value);
+            broadcast(room, { kind: "access_request", request: publicRequest(value) });
+            return sendJson(res, 200, { request: publicRequest(value) });
+          }
+          if (body.action === "approve") {
+            const role = body.role || value.requested_role || "write";
+            if (!["read", "write"].includes(role)) return sendJson(res, 400, { error: "approval role must be read or write" });
+            const token = mintInvite({ room, role, worker: value.worker || null, expires_in_seconds: body.expires_in_seconds || null });
+            value.status = "approved";
+            value.role = role;
+            value.token = token;
+            value.invite_url = `/r/${room}#invite=${token}`;
+            value.resolved_at = new Date().toISOString();
+            writeAccessRequest(room, value);
+            broadcast(room, { kind: "access_request", request: publicRequest(value) });
+            return sendJson(res, 200, { request: publicRequest(value, true) });
+          }
+          return sendJson(res, 400, { error: "action must be approve or deny" });
+        }
+        const made = createAccessRequest(room, body);
+        broadcast(room, { kind: "access_request", request: made.request });
+        return sendJson(res, 201, {
+          request: made.request,
+          request_secret: made.secret,
+          status_url: `/api/rooms/${room}/access-request-status?id=${made.request.id}&secret=${made.secret}`
+        });
+      }
+      if (endpoint === "access-requests" && req.method === "GET") {
+        const admin = verifyInvite(getBearer(req), room);
+        if (!can(admin, "admin")) return sendJson(res, 401, { error: "admin invite required" });
+        return sendJson(res, 200, { requests: listAccessRequests(room) });
+      }
+      if (endpoint === "access-request-status" && req.method === "GET") {
+        const id = url.searchParams.get("id") || "";
+        const secret = url.searchParams.get("secret") || "";
+        const value = readAccessRequest(room, id);
+        if (!value || !secret || hashRequestSecret(secret) !== value.secret_hash) return sendJson(res, 404, { error: "request not found" });
+        return sendJson(res, 200, { request: publicRequest(value, true) });
+      }
+      return sendJson(res, 405, { error: "method not allowed" });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message || "bad request" });
+    }
   }
 
   if (req.method === "POST" && pathname === "/api/rooms") {
