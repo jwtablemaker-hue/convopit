@@ -8,6 +8,8 @@ const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "127.0.0.1";
 const DATA_DIR = path.resolve(process.env.PIT_DATA_DIR || "./data");
 const MAX_BODY = 1024 * 1024;
+const DONATION_URL = process.env.DONATION_URL || "";
+const ROOM_VISIBILITIES = new Set(["private", "public"]);
 const PRESENCE_STATES = new Set(["working", "thinking", "waiting", "blocked", "idle", "done"]);
 const VALID_SCOPES = new Set(["read", "write", "admin"]);
 
@@ -89,12 +91,30 @@ function makeRoomId(input) {
   return `${base}-${crypto.randomBytes(3).toString("hex")}`;
 }
 
-function createRoom({ name }) {
+function createRoom({ name, visibility = "private" }) {
+  if (!ROOM_VISIBILITIES.has(visibility)) throw new Error("invalid visibility");
   let id;
   do { id = makeRoomId(name); } while (roomExists(id));
   fs.mkdirSync(roomDir(id), { recursive: true });
-  const meta = { id, name: String(name || id).slice(0, 120), created_at: new Date().toISOString() };
+  const meta = {
+    id,
+    name: String(name || id).slice(0, 120),
+    visibility,
+    created_at: new Date().toISOString()
+  };
   fs.writeFileSync(roomMetaFile(id), JSON.stringify(meta, null, 2));
+  return meta;
+}
+function updateRoomMeta(room, patch) {
+  const meta = loadRoomMeta(room);
+  if (!meta) throw new Error("room not found");
+  if (patch.visibility != null) {
+    if (!ROOM_VISIBILITIES.has(patch.visibility)) throw new Error("invalid visibility");
+    meta.visibility = patch.visibility;
+  }
+  if (patch.name != null) meta.name = String(patch.name).slice(0, 120);
+  meta.updated_at = new Date().toISOString();
+  fs.writeFileSync(roomMetaFile(room), JSON.stringify(meta, null, 2));
   return meta;
 }
 function loadRoomMeta(room) {
@@ -212,28 +232,41 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/") return staticFile(res, "index.html", "text/html; charset=utf-8") || sendJson(res, 404, { error: "UI missing" });
   if (req.method === "GET" && /^\/r\/[a-z0-9_-]+$/.test(pathname)) return staticFile(res, "index.html", "text/html; charset=utf-8") || sendJson(res, 404, { error: "UI missing" });
   if (req.method === "GET" && pathname === "/health") return sendJson(res, 200, { ok: true, service: "convopit" });
+  if (req.method === "GET" && pathname === "/api/config") {
+    return sendJson(res, 200, { donation_url: DONATION_URL || null });
+  }
 
   if (req.method === "POST" && pathname === "/api/rooms") {
     try {
       const body = await readJson(req);
-      const room = createRoom({ name: body.name });
+      const room = createRoom({ name: body.name, visibility: body.visibility || "private" });
       const token = mintInvite({ room: room.id, role: "admin", worker: body.worker || null });
       return sendJson(res, 201, { room, token, address: `/r/${room.id}`, invite_url: `/r/${room.id}#invite=${token}` });
     } catch (error) { return sendJson(res, 400, { error: error.message || "bad request" }); }
   }
 
-  const match = pathname.match(/^\/api\/rooms\/([^/]+)\/(events|presence|stream|state|invites|me)$/);
+  const match = pathname.match(/^\/api\/rooms\/([^/]+)\/(events|presence|stream|state|invites|me|settings)$/);
   if (!match) return sendJson(res, 404, { error: "not found" });
   const [, room, endpoint] = match;
   if (!validRoom(room) || !roomExists(room)) return sendJson(res, 404, { error: "room not found" });
 
-  const auth = verifyInvite(getBearer(req), room);
-  const needed = endpoint === "invites" ? "admin" : (req.method === "GET" ? "read" : "write");
+  const roomMeta = loadRoomMeta(room);
+  let auth = verifyInvite(getBearer(req), room);
+  if (!auth && roomMeta.visibility === "public" && req.method === "GET" && endpoint !== "invites" && endpoint !== "settings") {
+    auth = { role: "read", worker: null, exp: null, public: true };
+  }
+  const needed = (endpoint === "invites" || endpoint === "settings") ? "admin" : (req.method === "GET" ? "read" : "write");
   if (!can(auth, needed)) return sendJson(res, 401, { error: "invalid or insufficient invite" });
 
   try {
     if (endpoint === "me" && req.method === "GET") {
-      return sendJson(res, 200, { room: loadRoomMeta(room), access: { role: auth.role, worker: auth.worker, exp: auth.exp } });
+      return sendJson(res, 200, { room: loadRoomMeta(room), access: { role: auth.role, worker: auth.worker, exp: auth.exp, public: !!auth.public } });
+    }
+    if (endpoint === "settings" && req.method === "POST") {
+      const body = await readJson(req);
+      const updated = updateRoomMeta(room, { visibility: body.visibility, name: body.name });
+      broadcast(room, { kind: "room", room: updated });
+      return sendJson(res, 200, { room: updated });
     }
     if (endpoint === "invites" && req.method === "POST") {
       const body = await readJson(req);
