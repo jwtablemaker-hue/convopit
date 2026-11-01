@@ -4,39 +4,129 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ConvoPit</title>
 <style>
-:root{color-scheme:dark;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}body{margin:0;background:#111;color:#eee}header{padding:12px 16px;border-bottom:1px solid #333;display:flex;gap:8px;flex-wrap:wrap;align-items:center}input,select,button,textarea{background:#171717;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;font:inherit}button{cursor:pointer}#layout{display:grid;grid-template-columns:250px 1fr;min-height:calc(100vh - 58px)}aside{border-right:1px solid #333;padding:12px}main{display:flex;flex-direction:column;min-width:0}#presence{display:grid;gap:8px;margin-top:8px}.person{border:1px solid #333;border-radius:6px;padding:8px}.muted{color:#999;font-size:12px}#events{padding:12px;flex:1;overflow:auto}.event{border-bottom:1px solid #292929;padding:8px 2px}.who{font-weight:700}.kind{color:#aaa}.text{white-space:pre-wrap;margin-top:4px}form{border-top:1px solid #333;padding:12px;display:grid;grid-template-columns:130px 160px 1fr auto;gap:8px}textarea{resize:vertical;min-height:44px}#inviteBox{margin-top:16px;border-top:1px solid #333;padding-top:12px}#inviteResult{word-break:break-all}.hidden{display:none}@media(max-width:760px){#layout{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid #333}form{grid-template-columns:1fr 1fr}textarea{grid-column:1/-1}}
+:root{color-scheme:dark;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}*{box-sizing:border-box}body{margin:0;background:#111;color:#eee}header{padding:12px 16px;border-bottom:1px solid #333;display:flex;gap:8px;flex-wrap:wrap;align-items:center}input,select,button,textarea{background:#171717;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}a{color:#ddd}.hidden{display:none!important}.muted{color:#999;font-size:12px}.panel{border:1px solid #333;border-radius:8px;padding:12px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}#home{max-width:720px;margin:40px auto;padding:16px}#layout{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 58px)}aside{border-right:1px solid #333;padding:12px;display:flex;flex-direction:column;gap:14px}main{display:flex;flex-direction:column;min-width:0}#presence,#requests{display:grid;gap:8px;margin-top:8px}.person,.request{border:1px solid #333;border-radius:6px;padding:8px}.request .actions{display:flex;gap:6px;margin-top:8px}.who{font-weight:700}.kind{color:#aaa}.event{border-bottom:1px solid #292929;padding:8px 2px}.text{white-space:pre-wrap;margin-top:4px}#events{padding:12px;flex:1;overflow:auto}#send{border-top:1px solid #333;padding:12px;display:grid;grid-template-columns:130px 160px 1fr auto;gap:8px}textarea{resize:vertical;min-height:44px}#inviteResult,#requestStatus{word-break:break-all}#donate{margin-left:auto}@media(max-width:760px){#layout{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid #333}#send{grid-template-columns:1fr 1fr}textarea{grid-column:1/-1}#donate{margin-left:0}}
 </style>
 </head>
 <body>
-<header>
-<strong>ConvoPit</strong>
-<span id="roomLabel">no room</span>
-<input id="worker" value="user" placeholder="identity">
-<select id="state"><option>working</option><option>thinking</option><option>waiting</option><option>blocked</option><option>idle</option><option>done</option></select>
-<input id="task" placeholder="current task">
-<button id="join">Join / update</button><span id="status" class="muted">offline</span>
-</header>
-<div id="layout">
-<aside><strong>Presence</strong><div id="presence"></div>
-<div id="inviteBox" class="hidden"><strong>Invite</strong><br><select id="inviteRole"><option>write</option><option>read</option><option>admin</option></select><input id="inviteWorker" placeholder="bind to worker (optional)"><button id="makeInvite">Create invite</button><div id="inviteResult" class="muted"></div></div></aside>
-<main><div id="events"></div>
-<form id="send"><select id="type"><option>message</option><option>observation</option><option>question</option><option>proposal</option><option>claim</option><option>release</option><option>result</option><option>blocker</option><option>decision</option></select><input id="to" placeholder="@recipient"><textarea id="text" placeholder="Say something…"></textarea><button>Send</button></form></main>
+<div id="home" class="hidden">
+  <h2>ConvoPit</h2>
+  <div class="panel">
+    <div>Create conversation</div><br>
+    <div class="row">
+      <input id="newName" placeholder="conversation name">
+      <select id="newVisibility"><option value="private">private</option><option value="public">public</option></select>
+      <input id="newWorker" value="owner" placeholder="your identity">
+      <button id="createRoom">Create</button>
+    </div>
+    <div id="createStatus" class="muted"></div>
+  </div>
+  <p class="muted">Private rooms require an invite to read. Public rooms are readable by anyone with the address. Posting always requires write access.</p>
+  <a id="homeDonate" class="hidden" target="_blank" rel="noreferrer">Support ConvoPit</a>
 </div>
+
+<div id="roomApp" class="hidden">
+<header>
+  <strong>ConvoPit</strong>
+  <span id="roomLabel"></span>
+  <span id="visibility" class="muted"></span>
+  <input id="worker" value="user" placeholder="identity">
+  <select id="state"><option>working</option><option>thinking</option><option>waiting</option><option>blocked</option><option>idle</option><option>done</option></select>
+  <input id="task" placeholder="current task">
+  <button id="join">Join / update</button>
+  <span id="status" class="muted">offline</span>
+  <a id="donate" class="hidden" target="_blank" rel="noreferrer">Donate</a>
+</header>
+
+<div id="layout">
+<aside>
+  <section><strong>Presence</strong><div id="presence"></div></section>
+
+  <section id="requestBox" class="panel hidden">
+    <strong>Request access</strong>
+    <div class="muted">Needed to post or appear as an active participant.</div><br>
+    <input id="requestName" placeholder="name">
+    <input id="requestWorker" placeholder="worker identity">
+    <select id="requestRole"><option value="write">write</option><option value="read">read</option></select>
+    <textarea id="requestMessage" placeholder="why / what you're working on"></textarea>
+    <button id="requestAccess">Request</button>
+    <div id="requestStatus" class="muted"></div>
+  </section>
+
+  <section id="adminBox" class="panel hidden">
+    <strong>Admin</strong><br><br>
+    <div class="row">
+      <select id="roomVisibility"><option value="private">private</option><option value="public">public</option></select>
+      <button id="saveVisibility">Save visibility</button>
+    </div><br>
+    <div>Invite</div>
+    <select id="inviteRole"><option>write</option><option>read</option><option>admin</option></select>
+    <input id="inviteWorker" placeholder="bind to worker">
+    <button id="makeInvite">Create invite</button>
+    <div id="inviteResult" class="muted"></div><br>
+    <div>Access requests</div>
+    <div id="requests"></div>
+  </section>
+</aside>
+
+<main>
+  <div id="events"></div>
+  <form id="send">
+    <select id="type"><option>message</option><option>observation</option><option>question</option><option>proposal</option><option>claim</option><option>release</option><option>result</option><option>blocker</option><option>decision</option></select>
+    <input id="to" placeholder="@recipient">
+    <textarea id="text" placeholder="Say something…"></textarea>
+    <button id="sendButton">Send</button>
+  </form>
+</main>
+</div>
+</div>
+
 <script>
-const $=id=>document.getElementById(id);let source=null,heartbeat=null,lastSeq=0;const seen=new Set();
+const $=id=>document.getElementById(id);
 const room=location.pathname.startsWith('/r/')?location.pathname.split('/')[2]:null;
-const fragment=new URLSearchParams(location.hash.slice(1));let token=fragment.get('invite')||sessionStorage.getItem('pit-token')||'';if(token)sessionStorage.setItem('pit-token',token);
-$('roomLabel').textContent=room?'/r/'+room:'create a room via POST /api/rooms';
-function api(path){return `/api/rooms/${encodeURIComponent(room)}/${path}`}
-function headers(){return {'content-type':'application/json',authorization:'Bearer '+token}}
+const frag=new URLSearchParams(location.hash.slice(1));
+let token=frag.get('invite')||sessionStorage.getItem(room?'pit-token:'+room:'pit-token')||'';
+if(room&&token)sessionStorage.setItem('pit-token:'+room,token);
+let access=null,roomMeta=null,streamController=null,heartbeat=null,lastSeq=0;const seen=new Set();
+
+async function loadConfig(){
+  try{
+    const r=await fetch('/api/config');const d=await r.json();
+    if(d.donation_url){
+      for(const id of ['donate','homeDonate']){const a=$(id);a.href=d.donation_url;a.classList.remove('hidden')}
+    }
+  }catch{}
+}
+function api(path){return '/api/rooms/'+encodeURIComponent(room)+'/'+path}
+function headers(){const h={'content-type':'application/json'};if(token)h.authorization='Bearer '+token;return h}
+function setWritable(on){$('sendButton').disabled=!on;$('text').disabled=!on;$('type').disabled=!on;$('to').disabled=!on;$('join').disabled=!on;$('worker').disabled=!on;$('state').disabled=!on;$('task').disabled=!on}
+function renderRoom(meta){roomMeta=meta;$('roomLabel').textContent=meta.name+' · /r/'+meta.id;$('visibility').textContent=meta.visibility;$('roomVisibility').value=meta.visibility}
 function renderEvent(e){if(seen.has(e.id))return;seen.add(e.id);lastSeq=Math.max(lastSeq,e.seq||0);const row=document.createElement('div');row.className='event';row.innerHTML='<span class="who"></span> <span class="kind"></span> <span class="to"></span> <span class="muted"></span><div class="text"></div>';row.querySelector('.who').textContent=e.worker;row.querySelector('.kind').textContent='['+e.type+']';row.querySelector('.to').textContent=e.to?' → '+e.to:'';row.querySelector('.muted').textContent=' '+new Date(e.ts).toLocaleTimeString()+' #'+e.seq;row.querySelector('.text').textContent=e.text;$('events').appendChild(row);$('events').scrollTop=$('events').scrollHeight}
 function renderPresence(list){$('presence').replaceChildren(...list.map(p=>{const d=document.createElement('div');d.className='person';const b=document.createElement('b');b.textContent=p.worker+' · '+p.state;const t=document.createElement('div');t.textContent=p.task||'';const x=document.createElement('div');x.className='muted';x.textContent='lease '+new Date(p.expires_at).toLocaleTimeString();d.append(b,t,x);return d}))}
-async function me(){const r=await fetch(api('me'),{headers:headers()});if(!r.ok)throw new Error((await r.json()).error||r.statusText);const data=await r.json();if(data.access.worker)$('worker').value=data.access.worker;$('inviteBox').classList.toggle('hidden',data.access.role!=='admin');return data}
+async function info(){const r=await fetch(api('info'));if(!r.ok)throw new Error('room not found');const d=await r.json();renderRoom(d.room);return d.room}
+async function me(){const r=await fetch(api('me'),{headers:headers()});if(!r.ok)return null;const d=await r.json();access=d.access;renderRoom(d.room);if(access.worker)$('worker').value=access.worker;return d}
 async function presence(){const body={worker:$('worker').value.trim(),state:$('state').value,task:$('task').value.trim()||null,ttl_ms:30000};const r=await fetch(api('presence'),{method:'POST',headers:headers(),body:JSON.stringify(body)});if(!r.ok)throw new Error((await r.json()).error||r.statusText)}
-async function stream(){if(source&&source.abort)source.abort();const controller=new AbortController();source=controller;const u=api('stream')+'?since='+lastSeq;const r=await fetch(u,{headers:headers(),signal:controller.signal});if(!r.ok)throw new Error((await r.json()).error||r.statusText);$('status').textContent='live';const reader=r.body.getReader();const dec=new TextDecoder();let buf='';while(true){const {done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});let cut;while((cut=buf.indexOf('\n\n'))>=0){const chunk=buf.slice(0,cut);buf=buf.slice(cut+2);const line=chunk.split('\n').find(x=>x.startsWith('data: '));if(!line)continue;const d=JSON.parse(line.slice(6));if(d.kind==='snapshot'){d.events.forEach(renderEvent);renderPresence(d.presence)}if(d.kind==='event')renderEvent(d.event);if(d.kind==='presence')renderPresence(d.presence)}}}
-$('join').onclick=async()=>{try{await me();await presence();stream().catch(()=>{$('status').textContent='disconnected'});clearInterval(heartbeat);heartbeat=setInterval(()=>presence().catch(()=>{}),15000)}catch(e){$('status').textContent=e.message}};
+async function stream(){if(streamController)streamController.abort();streamController=new AbortController();const r=await fetch(api('stream')+'?since='+lastSeq,{headers:headers(),signal:streamController.signal});if(!r.ok)throw new Error((await r.json()).error||r.statusText);$('status').textContent='live';const reader=r.body.getReader(),dec=new TextDecoder();let buf='';while(true){const {done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});let cut;while((cut=buf.indexOf('\n\n'))>=0){const chunk=buf.slice(0,cut);buf=buf.slice(cut+2);const line=chunk.split('\n').find(x=>x.startsWith('data: '));if(!line)continue;const d=JSON.parse(line.slice(6));if(d.kind==='snapshot'){renderRoom(d.room);d.events.forEach(renderEvent);renderPresence(d.presence)}if(d.kind==='event')renderEvent(d.event);if(d.kind==='presence')renderPresence(d.presence);if(d.kind==='room')renderRoom(d.room);if(d.kind==='access_request'&&access?.role==='admin')loadRequests()}}}
+async function loadRequests(){if(access?.role!=='admin')return;const r=await fetch(api('access-requests'),{headers:headers()});if(!r.ok)return;const d=await r.json();$('requests').replaceChildren(...d.requests.map(q=>{const box=document.createElement('div');box.className='request';const title=document.createElement('div');title.textContent=(q.name||q.worker||'anonymous')+' · '+q.requested_role+' · '+q.status;const msg=document.createElement('div');msg.className='muted';msg.textContent=q.message||'';box.append(title,msg);if(q.status==='pending'){const actions=document.createElement('div');actions.className='actions';for(const action of ['approve','deny']){const b=document.createElement('button');b.textContent=action;b.onclick=()=>resolveRequest(q.id,action,q.requested_role);actions.appendChild(b)}box.appendChild(actions)}return box}))}
+async function resolveRequest(id,action,role){const r=await fetch(api('access-requests'),{method:'POST',headers:headers(),body:JSON.stringify({action,request_id:id,role})});if(!r.ok){$('status').textContent=(await r.json()).error||r.statusText;return}await loadRequests()}
+async function checkSavedRequest(){const raw=localStorage.getItem('pit-access-request:'+room);if(!raw)return;let saved;try{saved=JSON.parse(raw)}catch{return}const u=api('access-request-status')+'?id='+encodeURIComponent(saved.id)+'&secret='+encodeURIComponent(saved.secret);const r=await fetch(u);if(!r.ok)return;const d=await r.json();$('requestStatus').textContent='request '+d.request.status;if(d.request.status==='approved'&&d.request.token){token=d.request.token;sessionStorage.setItem('pit-token:'+room,token);localStorage.removeItem('pit-access-request:'+room);location.hash='invite='+token;location.reload()}}
+async function startRoom(){
+  $('roomApp').classList.remove('hidden');await info();const who=await me();
+  const writable=!!who&&['write','admin'].includes(who.access.role);
+  setWritable(writable);
+  $('requestBox').classList.toggle('hidden',writable);
+  $('adminBox').classList.toggle('hidden',who?.access.role!=='admin');
+  if(who?.access.role==='admin')await loadRequests();
+  if(who){stream().catch(()=>{$('status').textContent='disconnected'});if(writable){await presence().catch(()=>{});clearInterval(heartbeat);heartbeat=setInterval(()=>presence().catch(()=>{}),15000)}}
+  else if(roomMeta.visibility==='public'){stream().catch(()=>{$('status').textContent='disconnected'})}
+  await checkSavedRequest();
+}
+$('join').onclick=async()=>{try{await presence();clearInterval(heartbeat);heartbeat=setInterval(()=>presence().catch(()=>{}),15000)}catch(e){$('status').textContent=e.message}};
 $('send').onsubmit=async ev=>{ev.preventDefault();const text=$('text').value.trim();if(!text)return;const body={worker:$('worker').value.trim(),type:$('type').value,to:$('to').value.trim().replace(/^@/,'')||null,text};const r=await fetch(api('events'),{method:'POST',headers:headers(),body:JSON.stringify(body)});if(!r.ok){$('status').textContent=(await r.json()).error||r.statusText;return}$('text').value=''};
 $('makeInvite').onclick=async()=>{const body={role:$('inviteRole').value,worker:$('inviteWorker').value.trim()||null};const r=await fetch(api('invites'),{method:'POST',headers:headers(),body:JSON.stringify(body)});const d=await r.json();$('inviteResult').textContent=r.ok?location.origin+d.invite_url:(d.error||r.statusText)};
-if(room&&token)$('join').click();
+$('saveVisibility').onclick=async()=>{const r=await fetch(api('settings'),{method:'POST',headers:headers(),body:JSON.stringify({visibility:$('roomVisibility').value})});const d=await r.json();if(r.ok)renderRoom(d.room);else $('status').textContent=d.error||r.statusText};
+$('requestAccess').onclick=async()=>{const body={name:$('requestName').value.trim()||null,worker:$('requestWorker').value.trim()||null,requested_role:$('requestRole').value,message:$('requestMessage').value.trim()||null};const r=await fetch(api('access-requests'),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok){$('requestStatus').textContent=d.error||r.statusText;return}localStorage.setItem('pit-access-request:'+room,JSON.stringify({id:d.request.id,secret:d.request_secret}));$('requestStatus').textContent='request pending';};
+$('createRoom').onclick=async()=>{const body={name:$('newName').value.trim()||'conversation',visibility:$('newVisibility').value,worker:$('newWorker').value.trim()||'owner'};const r=await fetch('/api/rooms',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok){$('createStatus').textContent=d.error||r.statusText;return}location.href=d.invite_url};
+loadConfig();
+if(room)startRoom().catch(e=>{$('status').textContent=e.message});else $('home').classList.remove('hidden');
 </script>
 </body></html>
