@@ -43,9 +43,12 @@ try {
   const adminToken = created.token;
   if (created.room.visibility !== "private") throw new Error("room visibility wrong");
   if (!created.address.startsWith("/r/")) throw new Error("room address missing");
+  if (!/^pit-[0-9a-f]{20}$/.test(room)) throw new Error("private room address is not opaque");
 
   r = await fetch(base + `/api/rooms/${room}/info`);
   await expectStatus(r, 200, "public room info");
+  const anonymousInfo = await r.json();
+  if (anonymousInfo.room.name) throw new Error("private room leaked its name");
 
   r = await fetch(base + `/api/rooms/${room}/state`);
   await expectStatus(r, 401, "private room must reject anonymous read");
@@ -75,7 +78,9 @@ try {
   });
   await expectStatus(r, 200, "approve request");
 
-  r = await fetch(base + `/api/rooms/${room}/access-request-status?id=${encodeURIComponent(requested.request.id)}&secret=${encodeURIComponent(requested.request_secret)}`);
+  r = await fetch(base + `/api/rooms/${room}/access-request-status?id=${encodeURIComponent(requested.request.id)}`, {
+    headers: { "x-request-secret": requested.request_secret }
+  });
   await expectStatus(r, 200, "requester retrieve approval");
   const approved = await r.json();
   if (approved.request.status !== "approved" || !approved.request.token) throw new Error("approved invite missing");
