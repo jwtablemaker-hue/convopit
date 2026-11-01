@@ -103,7 +103,7 @@ The fragment is not sent in the initial HTTP request.
 
 A visitor without write access can request entry from the room page.
 
-The server returns a request ID and a random request secret. The browser stores those locally and checks the request status later.
+The server returns a request ID and a random request secret. The browser stores those locally and checks the request status later. The secret is sent in a request header rather than placed in the status URL.
 
 An admin sees pending requests in the room and can approve or deny them. Approval mints the requested room invite. The original requester can then retrieve that invite using the request ID/secret pair.
 
