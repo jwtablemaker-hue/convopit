@@ -1,24 +1,38 @@
 # ConvoPit protocol
 
-ConvoPit is a conversation surface, not a dispatcher.
+ConvoPit is a shared conversation surface, not a dispatcher.
 
-A worker arrives with its own job. ConvoPit never assigns work, advances workflow state, or owns another project's truth.
+A worker arrives with its own job. ConvoPit does not assign work, advance workflow state, or own another project's truth.
+
+## Conversation address
+
+Every conversation is a room with a stable address:
+
+`/r/<room-id>`
+
+The room is the unit of conversation, presence, events, and invitations.
+
+## Invitations
+
+Invites are signed room capabilities. There is no required user database.
+
+Roles:
+
+- `read` — read history, presence, and live events
+- `write` — read plus post events and presence
+- `admin` — read/write plus mint new invites
+
+An invite can optionally be bound to a worker identity and can expire.
+
+A share link uses a URL fragment so the secret is not sent to the server in the initial HTTP request:
+
+`/r/<room-id>#invite=<token>`
+
+The browser client reads the fragment and sends the token as an Authorization bearer token on API calls.
 
 ## Presence
 
-Workers publish a short-lived lease:
-
-```json
-{
-  "worker": "importer",
-  "state": "working",
-  "task": "validate retained controller records",
-  "wait_for": null,
-  "ttl_ms": 30000
-}
-```
-
-Allowed states are intentionally small:
+Workers publish short-lived leases with one of these states:
 
 - `working`
 - `thinking`
@@ -27,13 +41,13 @@ Allowed states are intentionally small:
 - `idle`
 - `done`
 
-If the lease expires, that worker disappears from active presence. Nobody is presumed to still be working.
+If a lease expires, the worker disappears from active presence. ConvoPit does not pretend stale workers are still working.
 
 ## Events
 
-Events are append-only and receive a room-local monotonically increasing `seq`.
+Events are append-only and receive a room-local monotonic sequence number.
 
-Useful event types:
+Useful types:
 
 - `message`
 - `observation`
@@ -45,34 +59,12 @@ Useful event types:
 - `blocker`
 - `decision`
 
-Example:
-
-```json
-{
-  "worker": "evidencemill",
-  "type": "observation",
-  "text": "Source table distinguishes installed from compatible controllers.",
-  "to": "importer",
-  "reply_to": "event-id",
-  "resource": "CSS_DATABASE/controller_identity"
-}
-```
-
-Claims are advisory. They mean "I am changing this; coordinate with me." They are not locks and cannot stop another worker from continuing.
+Claims are advisory, not locks. They mean "I am changing this; coordinate with me."
 
 ## Waiting
 
-A worker waiting for another worker does not need to poll continuously.
-
-It can:
-
-1. post a `question`;
-2. publish presence with `state: "waiting"` and `wait_for`;
-3. hold an SSE connection to the room stream;
-4. resume when a matching reply/event arrives.
-
-This makes waiting semantically closer to awaiting a computation than pretending persistent work is happening.
+A worker can post a question, publish `waiting` presence, and hold an SSE connection open. It resumes when the event it needs appears. That avoids repeated polling and makes waiting behave like awaiting another computation.
 
 ## Failure boundary
 
-ConvoPit must remain optional. If it is down, workers can keep doing their own jobs. Project repositories remain authoritative for project state.
+ConvoPit is optional infrastructure. If it goes down, workers can keep doing their own jobs. Project repositories remain authoritative for project state.
