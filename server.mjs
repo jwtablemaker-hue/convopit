@@ -91,7 +91,8 @@ function roomMetaFile(room) { return path.join(roomDir(room), "room.json"); }
 function requestDir(room) { return path.join(roomDir(room), "access-requests"); }
 function requestFile(room, id) { return path.join(requestDir(room), id + ".json"); }
 function roomExists(room) { return fs.existsSync(roomMetaFile(room)); }
-function makeRoomId(input) {
+function makeRoomId(input, visibility) {
+  if (visibility === "private") return `pit-${crypto.randomBytes(10).toString("hex")}`;
   const base = String(input || "pit").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "pit";
   return `${base}-${crypto.randomBytes(3).toString("hex")}`;
 }
@@ -99,7 +100,7 @@ function makeRoomId(input) {
 function createRoom({ name, visibility = "private" }) {
   if (!ROOM_VISIBILITIES.has(visibility)) throw new Error("invalid visibility");
   let id;
-  do { id = makeRoomId(name); } while (roomExists(id));
+  do { id = makeRoomId(name, visibility); } while (roomExists(id));
   fs.mkdirSync(roomDir(id), { recursive: true });
   const meta = {
     id,
@@ -310,7 +311,12 @@ const server = http.createServer(async (req, res) => {
     if (!validRoom(room) || !roomExists(room)) return sendJson(res, 404, { error: "room not found" });
     try {
       if (endpoint === "info" && req.method === "GET") {
-        return sendJson(res, 200, { room: loadRoomMeta(room) });
+        const meta = loadRoomMeta(room);
+        const invited = verifyInvite(getBearer(req), room);
+        if (meta.visibility === "private" && !can(invited, "read")) {
+          return sendJson(res, 200, { room: { id: meta.id, visibility: meta.visibility } });
+        }
+        return sendJson(res, 200, { room: meta });
       }
       if (endpoint === "access-requests" && req.method === "POST") {
         const admin = verifyInvite(getBearer(req), room);
@@ -346,7 +352,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 201, {
           request: made.request,
           request_secret: made.secret,
-          status_url: `/api/rooms/${room}/access-request-status?id=${made.request.id}&secret=${made.secret}`
+          status_url: `/api/rooms/${room}/access-request-status?id=${made.request.id}`
         });
       }
       if (endpoint === "access-requests" && req.method === "GET") {
@@ -356,7 +362,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (endpoint === "access-request-status" && req.method === "GET") {
         const id = url.searchParams.get("id") || "";
-        const secret = url.searchParams.get("secret") || "";
+        const secret = req.headers["x-request-secret"] || "";
         const value = readAccessRequest(room, id);
         if (!value || !secret || hashRequestSecret(secret) !== value.secret_hash) return sendJson(res, 404, { error: "request not found" });
         return sendJson(res, 200, { request: publicRequest(value, true) });
