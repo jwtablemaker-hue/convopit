@@ -1,0 +1,14 @@
+{
+  "name": "convopit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A deliberately small real-time conversation and presence layer for independent workers.",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
