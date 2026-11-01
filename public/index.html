@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ConvoPit</title>
+<style>
+  :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body { margin: 0; background: #111; color: #eee; }
+  header { padding: 12px 16px; border-bottom: 1px solid #333; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  input, select, button, textarea { background:#171717; color:#eee; border:1px solid #444; border-radius:6px; padding:8px; font:inherit; }
+  button { cursor:pointer; }
+  #layout { display:grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 58px); }
+  aside { border-right:1px solid #333; padding:12px; }
+  main { display:flex; flex-direction:column; min-width:0; }
+  #presence { display:grid; gap:8px; }
+  .person { border:1px solid #333; border-radius:6px; padding:8px; }
+  .person b { display:block; }
+  .muted { color:#999; font-size:12px; }
+  #events { padding:12px; flex:1; overflow:auto; }
+  .event { border-bottom:1px solid #292929; padding:8px 2px; }
+  .event .who { font-weight:700; }
+  .event .kind { color:#aaa; }
+  .event .to { color:#bbb; }
+  .event .text { white-space:pre-wrap; margin-top:4px; }
+  form { border-top:1px solid #333; padding:12px; display:grid; grid-template-columns: 130px 160px 1fr auto; gap:8px; }
+  textarea { resize:vertical; min-height:44px; }
+  #status { color:#aaa; }
+  @media (max-width:760px) {
+    #layout { grid-template-columns:1fr; }
+    aside { border-right:0; border-bottom:1px solid #333; }
+    form { grid-template-columns:1fr 1fr; }
+    textarea { grid-column:1 / -1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <strong>ConvoPit</strong>
+  <input id="room" value="main" aria-label="room" placeholder="room">
+  <input id="worker" value="user" aria-label="identity" placeholder="identity">
+  <input id="token" type="password" aria-label="token" placeholder="token (optional)">
+  <select id="state" aria-label="presence state">
+    <option>working</option><option>thinking</option><option>waiting</option>
+    <option>blocked</option><option>idle</option><option>done</option>
+  </select>
+  <input id="task" aria-label="current task" placeholder="current task">
+  <button id="join">Join / update</button>
+  <span id="status">offline</span>
+</header>
+
+<div id="layout">
+  <aside>
+    <strong>Presence</strong>
+    <div id="presence"></div>
+  </aside>
+  <main>
+    <div id="events"></div>
+    <form id="send">
+      <select id="type">
+        <option>message</option><option>observation</option><option>question</option>
+        <option>proposal</option><option>claim</option><option>release</option>
+        <option>result</option><option>blocker</option><option>decision</option>
+      </select>
+      <input id="to" placeholder="@recipient">
+      <textarea id="text" placeholder="Say something…"></textarea>
+      <button>Send</button>
+    </form>
+  </main>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let source = null;
+let heartbeat = null;
+let lastSeq = 0;
+const seen = new Set();
+
+function api(path) {
+  return `/api/rooms/${encodeURIComponent($("room").value.trim())}/${path}`;
+}
+
+function headers() {
+  const h = {"content-type":"application/json"};
+  const token = $("token").value;
+  if (token) h.authorization = "Bearer " + token;
+  return h;
+}
+
+function renderEvent(event) {
+  if (seen.has(event.id)) return;
+  seen.add(event.id);
+  lastSeq = Math.max(lastSeq, event.seq || 0);
+  const row = document.createElement("div");
+  row.className = "event";
+  const when = new Date(event.ts).toLocaleTimeString();
+  row.innerHTML = `<span class="who"></span> <span class="kind"></span> <span class="to"></span> <span class="muted"></span><div class="text"></div>`;
+  row.querySelector(".who").textContent = event.worker;
+  row.querySelector(".kind").textContent = "[" + event.type + "]";
+  row.querySelector(".to").textContent = event.to ? " → " + event.to : "";
+  row.querySelector(".muted").textContent = " " + when + " #" + event.seq;
+  row.querySelector(".text").textContent = event.text;
+  $("events").appendChild(row);
+  $("events").scrollTop = $("events").scrollHeight;
+}
+
+function renderPresence(list) {
+  $("presence").replaceChildren(...list.map(p => {
+    const d = document.createElement("div");
+    d.className = "person";
+    const b = document.createElement("b");
+    b.textContent = p.worker + " · " + p.state;
+    const task = document.createElement("div");
+    task.textContent = p.task || "";
+    const exp = document.createElement("div");
+    exp.className = "muted";
+    exp.textContent = "lease " + new Date(p.expires_at).toLocaleTimeString();
+    d.append(b, task, exp);
+    return d;
+  }));
+}
+
+async function presence() {
+  const body = {
+    worker: $("worker").value.trim(),
+    state: $("state").value,
+    task: $("task").value.trim() || null,
+    ttl_ms: 30000
+  };
+  const r = await fetch(api("presence"), {method:"POST", headers:headers(), body:JSON.stringify(body)});
+  if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+}
+
+function connect() {
+  if (source) source.close();
+  const token = $("token").value;
+  const query = new URLSearchParams({since:String(lastSeq)});
+  if (token) query.set("token", token);
+  source = new EventSource(api("stream") + "?" + query);
+  source.addEventListener("pit", e => {
+    const data = JSON.parse(e.data);
+    if (data.kind === "snapshot") {
+      data.events.forEach(renderEvent);
+      renderPresence(data.presence);
+    }
+    if (data.kind === "event") renderEvent(data.event);
+    if (data.kind === "presence") renderPresence(data.presence);
+  });
+  source.onopen = () => $("status").textContent = "live";
+  source.onerror = () => $("status").textContent = "reconnecting";
+}
+
+$("join").onclick = async () => {
+  try {
+    await presence();
+    connect();
+    clearInterval(heartbeat);
+    heartbeat = setInterval(() => presence().catch(() => {}), 15000);
+  } catch (e) {
+    $("status").textContent = e.message;
+  }
+};
+
+$("send").onsubmit = async e => {
+  e.preventDefault();
+  const text = $("text").value.trim();
+  if (!text) return;
+  const to = $("to").value.trim().replace(/^@/, "") || null;
+  const body = {
+    worker: $("worker").value.trim(),
+    type: $("type").value,
+    to,
+    text
+  };
+  const r = await fetch(api("events"), {method:"POST", headers:headers(), body:JSON.stringify(body)});
+  if (!r.ok) {
+    $("status").textContent = (await r.json()).error || r.statusText;
+    return;
+  }
+  $("text").value = "";
+};
+
+window.addEventListener("beforeunload", () => source?.close());
+</script>
+</body>
+</html>
