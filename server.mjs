@@ -82,6 +82,9 @@ function validName(value) {
 function validRoom(value) {
   return typeof value === "string" && /^[a-z0-9][a-z0-9_-]{2,63}$/.test(value);
 }
+function validRequestId(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 function roomDir(room) { return path.join(DATA_DIR, "rooms", room); }
 function eventFile(room) { return path.join(roomDir(room), "events.jsonl"); }
 function roomMetaFile(room) { return path.join(roomDir(room), "room.json"); }
@@ -167,7 +170,7 @@ function createAccessRequest(room, input) {
   return { request: publicRequest(value), secret };
 }
 function readAccessRequest(room, id) {
-  if (!validName(id)) return null;
+  if (!validRequestId(id)) return null;
   const file = requestFile(room, id);
   if (!fs.existsSync(file)) return null;
   return JSON.parse(fs.readFileSync(file, "utf8"));
